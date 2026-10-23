@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Call Interpreter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one working column — live caption on top, glossary + settings in a drawer below, transcript as a log. */
+:root {
+  --bg: #f6f7f4;
+  --surface: #ffffff;
+  --fg: #1d2420;
+  --muted: #5d6a62;
+  --line: #dde3dc;
+  --accent: #b5462b;        /* sealing-wax red: "live" + primary action */
+  --accent-fg: #ffffff;
+  --es: #1f5d4c;            /* Spanish output ink */
+  --ok: #2f7a4f;
+  --warn: #9a6a12;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-body: "Public Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141917; --surface: #1c2320; --fg: #e7ece8; --muted: #9aa8a0; --line: #2d3732;
+    --accent: #e0694b; --accent-fg: #160c09; --es: #7fd1b5; --ok: #6cc28f; --warn: #e2b450;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141917; --surface: #1c2320; --fg: #e7ece8; --muted: #9aa8a0; --line: #2d3732;
+  --accent: #e0694b; --accent-fg: #160c09; --es: #7fd1b5; --ok: #6cc28f; --warn: #e2b450;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 15px/1.55 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: max(20px, env(safe-area-inset-top, 0px)) 48px;
+}
+main { max-width: 760px; margin: 0 auto; display: grid; gap: 20px; }
+h1 { font: 650 1.9rem/1.1 var(--font-display); margin: 0; text-wrap: balance; }
+h2 { font: 600 0.78rem/1 var(--font-body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; }
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+header p { margin: 4px 0 0; color: var(--muted); }
+button, select, input, textarea { font: inherit; color: inherit; }
+button {
+  border: 1px solid var(--line); background: var(--surface); border-radius: 8px;
+  padding: 8px 14px; cursor: pointer;
+}
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+input, select, textarea {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%;
+}
+textarea { font-family: var(--font-mono); font-size: 13px; min-height: 120px; resize: vertical; }
+label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+
+.stage {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 20px; display: grid; gap: 14px;
+}
+.controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+#listenBtn { min-width: 170px; padding: 12px 18px; font-size: 1rem; }
+.status { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
+.status.live .dot { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .status.live .dot { animation: none; } }
+.heard { font-size: 14px; color: var(--muted); min-height: 1.5em; }
+.heard em { font-style: normal; opacity: 0.7; }
+.latest {
+  font: 500 1.6rem/1.3 var(--font-display); color: var(--es); min-height: 2.6em; margin: 0;
+  overflow-wrap: anywhere;
+}
+.latest.placeholder { color: var(--muted); font-size: 1.15rem; }
+
+.log { display: grid; gap: 0; }
+.seg { display: grid; grid-template-columns: 4.2em 1fr; gap: 4px 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.seg time { font: 12px/1.6 var(--font-mono); color: var(--muted); grid-row: span 2; font-variant-numeric: tabular-nums; }
+.seg .src { color: var(--muted); font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.seg .es { color: var(--es); font-size: 16px; min-width: 0; overflow-wrap: anywhere; }
+.seg .es.pending { color: var(--muted); font-style: italic; }
+.seg .es.err { color: var(--accent); }
+.seg .hits { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: 11px/1 var(--font-mono); border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; color: var(--muted); }
+.empty { color: var(--muted); padding: 12px 0; border-top: 1px solid var(--line); }
+
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+summary { cursor: pointer; padding: 14px 18px; display: flex; justify-content: space-between; gap: 12px; align-items: center; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+summary .meta { font-size: 13px; color: var(--muted); }
+.panel { padding: 0 18px 18px; display: grid; gap: 12px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.note { font-size: 13px; color: var(--muted); margin: 0; }
+.note.ok { color: var(--ok); }
+.note.warn { color: var(--warn); }
+.tablewrap { overflow-x: auto; max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { position: sticky; top: 0; background: var(--surface); color: var(--muted); font-weight: 600; }
+td:last-child { color: var(--es); }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.check { display: flex; gap: 8px; align-items: center; color: var(--fg); font-size: 14px; }
+.check input { width: auto; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Call Interpreter</h1>
+      <p>Listens to the call and writes a clean Spanish translation that follows your glossary.</p>
+    </div>
+  </header>
+
+  <section class="stage" aria-label="Live translation">
+    <div class="controls">
+      <button id="listenBtn" class="primary">Start listening</button>
+      <span id="status" class="status"><span class="dot"></span><span id="statusText">Idle</span></span>
+    </div>
+    <div class="heard" id="heard" aria-live="polite"></div>
+    <p class="latest placeholder" id="latest" aria-live="polite">Put the call on speaker, then press Start listening. Spanish appears here.</p>
+    <div class="row">
+      <input id="manualText" placeholder="Or type a sentence to test the translation" aria-label="Text to translate">
+      <button id="manualBtn">Translate</button>
+    </div>
+  </section>
+
+  <section aria-label="Transcript" style="display:grid;gap:10px">
+    <div class="row" style="justify-content:space-between">
+      <h2>Transcript</h2>
+      <div class="row">
+        <button id="copyBtn">Copy Spanish</button>
+        <button id="clearBtn">Clear</button>
+      </div>
+    </div>
+    <div class="log" id="log"><div class="empty" id="emptyLog">Nothing translated yet.</div></div>
+  </section>
+
+  <details id="glossaryPanel">
+    <summary><h2>Glossary</h2><span class="meta" id="glossaryMeta">No glossary loaded</span></summary>
+    <div class="panel">
+      <p class="note">Upload your glossary (.docx, .txt, .csv or .tsv) or paste it below. One term per line, English then Spanish, separated by a tab, “=”, “→”, “ - ”, “:” or a comma. Tables in a Word file work too: first column English, second column Spanish.</p>
+      <div class="row">
+        <input type="file" id="glossaryFile" accept=".docx,.txt,.csv,.tsv,text/plain,text/csv" aria-label="Glossary file">
+      </div>
+      <textarea id="glossaryText" aria-label="Glossary text" placeholder="policyholder = asegurado&#10;deductible = deducible&#10;claim = reclamo"></textarea>
+      <div class="row">
+        <button id="glossarySave">Use this glossary</button>
+        <span class="note" id="glossaryNote"></span>
+      </div>
+      <div class="tablewrap" id="glossaryTableWrap" hidden>
+        <table><thead><tr><th>English</th><th>Spanish</th></tr></thead><tbody id="glossaryBody"></tbody></table>
+      </div>
+    </div>
+  </details>
+
+  <details id="settingsPanel">
+    <summary><h2>Settings</h2><span class="meta" id="settingsMeta"></span></summary>
+    <div class="panel">
+      <div class="grid2">
+        <label>Claude API key
+          <input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-…">
+        </label>
+        <label>Model
+          <select id="model">
+            <option value="claude-sonnet-5-5">Sonnet 5.5 (best balance)</option>
+            <option value="claude-haiku-5-5">Haiku 5.5 (fastest)</option>
+            <option value="claude-opus-5-5">Opus 5.5 (highest quality)</option>
+          </select>
+        </label>
+        <label>Caller speaks
+          <select id="srcLang">
+            <option value="en-US">English (US)</option>
+            <option value="en-GB">English (UK)</option>
+            <option value="fr-FR">French</option>
+            <option value="pt-BR">Portuguese (Brazil)</option>
+            <option value="zh-CN">Chinese (Mandarin)</option>
+            <option value="ar-SA">Arabic</option>
+          </select>
+        </label>
+        <label>Spanish variety
+          <select id="variety">
+            <option value="neutral Latin American Spanish">Neutral Latin American</option>
+            <option value="Mexican Spanish">Mexican</option>
+            <option value="Spanish as spoken in Spain">Spain</option>
+            <option value="US Spanish">US Spanish</option>
+          </select>
+        </label>
+      </div>
+      <label class="check"><input type="checkbox" id="speak"> Read the Spanish aloud</label>
+      <p class="note">Your key is kept only in this browser and sent only to api.anthropic.com. Live listening needs Chrome or Edge (desktop or Android) or Safari.</p>
+    </div>
+  </details>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("ci." + k); return v === null ? d : v; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem("ci." + k, v); } catch {} },
+  };
+
+  // ---------- Settings ----------
+  for (const id of ["apiKey", "model", "srcLang", "variety"]) {
+    const el = $(id);
+    el.value = store.get(id, el.value);
+    el.addEventListener("change", () => { store.set(id, el.value); refreshSettingsMeta(); });
+  }
+  $("speak").checked = store.get("speak", "0") === "1";
+  $("speak").addEventListener("change", () => store.set("speak", $("speak").checked ? "1" : "0"));
+  function refreshSettingsMeta() {
+    $("settingsMeta").textContent = $("apiKey").value ? "API key saved" : "Add your Claude API key";
+  }
+  refreshSettingsMeta();
+  if (!$("apiKey").value) $("settingsPanel").open = true;
+
+  // ---------- Glossary ----------
+  let glossary = [];
+
+  function parseGlossary(text) {
+    const out = [];
+    const seen = new Set();
+    for (let raw of text.split(/\r?\n/)) {
+      const line = raw.replace(/^\s*[\-•*\d.)]+\s+/, "").trim();
+      if (!line) continue;
+      let parts = null;
+      for (const sep of ["\t", " = ", "=", " → ", "→", " -> ", " – ", " — ", " - ", ": ", ";", ","]) {
+        if (line.includes(sep)) { parts = line.split(sep); break; }
+      }
+      if (!parts || parts.length < 2) continue;
+      const en = parts[0].trim();
+      const es = parts.slice(1).join(", ").trim();
+      if (!en || !es || /^(english|term|inglés|ingles)$/i.test(en)) continue;
+      const key = en.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ en, es });
+    }
+    return out;
+  }
+
+  function tablesToText(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const lines = [];
+    doc.querySelectorAll("tr").forEach((tr) => {
+      const cells = [...tr.querySelectorAll("td,th")].map((c) => c.textContent.trim()).filter(Boolean);
+      if (cells.length >= 2) lines.push(cells[0] + "\t" + cells[1]);
+    });
+    doc.querySelectorAll("table").forEach((t) => t.remove());
+    doc.querySelectorAll("p,li").forEach((p) => { const t = p.textContent.trim(); if (t) lines.push(t); });
+    return lines.join("\n");
+  }
+
+  function applyGlossary(text, source) {
+    glossary = parseGlossary(text);
+    store.set("glossary", text);
+    $("glossaryText").value = text;
+    renderGlossary();
+    const n = glossary.length;
+    $("glossaryNote").className = "note " + (n ? "ok" : "warn");
+    $("glossaryNote").textContent = n
+      ? `Loaded ${n} term${n === 1 ? "" : "s"}${source ? " from " + source : ""}.`
+      : "No term pairs found. Put English and Spanish on one line, separated by a tab or “=”.";
+  }
+
+  function renderGlossary() {
+    const body = $("glossaryBody");
+    body.textContent = "";
+    for (const g of glossary) {
+      const tr = document.createElement("tr");
+      const a = document.createElement("td"); a.textContent = g.en;
+      const b = document.createElement("td"); b.textContent = g.es;
+      tr.append(a, b); body.append(tr);
+    }
+    $("glossaryTableWrap").hidden = glossary.length === 0;
+    $("glossaryMeta").textContent = glossary.length ? `${glossary.length} terms` : "No glossary loaded";
+  }
+
+  $("glossaryFile").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      if (/\.docx$/i.test(file.name)) {
+        if (!window.mammoth) throw new Error("The Word reader didn't load. Save the glossary as .txt or paste it instead.");
+        const { value } = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+        applyGlossary(tablesToText(value), file.name);
+      } else {
+        applyGlossary(await file.text(), file.name);
+      }
+    } catch (err) {
+      $("glossaryNote").className = "note warn";
+      $("glossaryNote").textContent = err.message;
+    }
+  });
+  $("glossarySave").addEventListener("click", () => applyGlossary($("glossaryText").value, ""));
+
+  applyGlossary(store.get("glossary", ""), "");
+  if (!glossary.length) $("glossaryNote").textContent = "";
+
+  function relevantTerms(text) {
+    if (glossary.length <= 200) return { all: glossary, hits: matchTerms(text) };
+    const hits = matchTerms(text);
+    return { all: hits, hits };
+  }
+  function matchTerms(text) {
+    const t = " " + text.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, " ") + " ";
+    return glossary.filter((g) => {
+      const k = g.en.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, " ").trim();
+      return k && (t.includes(" " + k + " ") || t.includes(" " + k + "s ") || t.includes(" " + k + "es "));
+    });
+  }
+
+  // ---------- Translation ----------
+  const history = []; // {src, es}
+  let chain = Promise.resolve();
+
+  function buildSystem(terms) {
+    const lang = $("srcLang").selectedOptions[0].textContent;
+    let s = `You are a professional phone interpreter. You receive short speech-to-text segments of a live phone call spoken in ${lang} and translate each one into clean, natural ${$("variety").value}.
+
+Rules:
+- Output ONLY the Spanish translation of the new segment. No quotes, notes, labels or explanations.
+- Make it clean: drop filler words (um, uh, like, you know), stutters, repeated words and false starts, and fix obvious speech-recognition errors from context. Keep the full meaning, tone, names, numbers, dates and amounts.
+- Use the earlier segments only as context; do not translate them again.
+- If the segment is only filler or noise, output nothing.`;
+    if (terms.length) {
+      s += `
+
+Mandatory glossary. Whenever a source term below (or its plural or inflected form) appears, translate it with exactly the given Spanish term, adjusting only gender and number to fit the sentence:
+` + terms.map((g) => `${g.en} => ${g.es}`).join("\n");
+    }
+    return s;
+  }
+
+  async function callClaude(src) {
+    const key = $("apiKey").value.trim();
+    if (!key) throw new Error("Add your Claude API key in Settings.");
+    const { all, hits } = relevantTerms(src);
+    const context = history.slice(-4).map((h) => `${h.src}\n=> ${h.es}`).join("\n\n");
+    const user = (context ? `Earlier in the call:\n${context}\n\n` : "") + `New segment to translate:\n${src}`;
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model: $("model").value,
+        max_tokens: 1024,
+        system: buildSystem(all),
+        messages: [{ role: "user", content: user }],
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error?.message || `Request failed (${res.status}).`);
+    const text = (data.content || []).filter((c) => c.type === "text").map((c) => c.text).join("").trim();
+    return { text, hits };
+  }
+
+  function addSegment(src) {
+    $("emptyLog")?.remove();
+    const row = document.createElement("div");
+    row.className = "seg";
+    const time = document.createElement("time");
+    time.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const s = document.createElement("div"); s.className = "src"; s.textContent = src;
+    const es = document.createElement("div"); es.className = "es pending"; es.textContent = "Translating…";
+    row.append(time, s, es);
+    $("log").prepend(row);
+    return { row, es };
+  }
+
+  function translate(src) {
+    src = src.trim();
+    if (!src) return;
+    const ui = addSegment(src);
+    chain = chain.then(async () => {
+      try {
+        const { text, hits } = await callClaude(src);
+        ui.es.className = "es";
+        ui.es.textContent = text || "(no speech)";
+        if (text) {
+          history.push({ src, es: text });
+          const latest = $("latest");
+          latest.classList.remove("placeholder");
+          latest.textContent = text;
+          speak(text);
+        }
+        if (hits.length) {
+          const box = document.createElement("div"); box.className = "hits";
+          for (const h of hits) { const c = document.createElement("span"); c.className = "chip"; c.textContent = `${h.en} → ${h.es}`; box.append(c); }
+          ui.row.append(box);
+        }
+      } catch (err) {
+        ui.es.className = "es err";
+        ui.es.textContent = err.message;
+      }
+    });
+  }
+
+  function speak(text) {
+    if (!$("speak").checked || !("speechSynthesis" in window)) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = /Spain/.test($("variety").value) ? "es-ES" : "es-MX";
+    speechSynthesis.speak(u);
+  }
+
+  $("manualBtn").addEventListener("click", () => { translate($("manualText").value); $("manualText").value = ""; });
+  $("manualText").addEventListener("keydown", (e) => { if (e.key === "Enter") $("manualBtn").click(); });
+
+  $("copyBtn").addEventListener("click", async () => {
+    const text = [...history].map((h) => h.es).join("\n");
+    try { await navigator.clipboard.writeText(text); $("copyBtn").textContent = "Copied"; }
+    catch { $("copyBtn").textContent = "Copy failed"; }
+    setTimeout(() => ($("copyBtn").textContent = "Copy Spanish"), 1500);
+  });
+  $("clearBtn").addEventListener("click", () => {
+    history.length = 0;
+    $("log").innerHTML = '<div class="empty" id="emptyLog">Nothing translated yet.</div>';
+    $("latest").className = "latest placeholder";
+    $("latest").textContent = "Cleared. New Spanish appears here.";
+  });
+
+  // ---------- Listening ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null, listening = false, pending = "", flushTimer = null;
+
+  function setStatus(text, live) {
+    $("statusText").textContent = text;
+    $("status").classList.toggle("live", !!live);
+  }
+
+  // Short finals are buffered briefly so one sentence isn't split into fragments.
+  function queueFinal(text) {
+    pending = (pending + " " + text).trim();
+    clearTimeout(flushTimer);
+    const endsSentence = /[.?!]$/.test(pending) || pending.split(/\s+/).length >= 25;
+    flushTimer = setTimeout(flush, endsSentence ? 150 : 1200);
+  }
+  function flush() {
+    clearTimeout(flushTimer);
+    if (pending) translate(pending);
+    pending = "";
+  }
+
+  function start() {
+    if (!SR) { setStatus("This browser can't do live listening. Use Chrome, Edge or Safari.", false); return; }
+    rec = new SR();
+    rec.lang = $("srcLang").value;
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) queueFinal(r[0].transcript);
+        else interim += r[0].transcript;
+      }
+      $("heard").innerHTML = "";
+      const span = document.createElement("em");
+      span.textContent = (pending ? pending + " " : "") + interim;
+      $("heard").append(span);
+    };
+    rec.onerror = (e) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        stop(); setStatus("Microphone blocked. Allow mic access for this page and try again.", false);
+      } else if (e.error !== "no-speech" && e.error !== "aborted") {
+        setStatus("Listening hiccup (" + e.error + "), restarting…", true);
+      }
+    };
+    rec.onend = () => { if (listening) { try { rec.start(); } catch {} } };
+    listening = true;
+    rec.start();
+    setStatus("Listening", true);
+    $("listenBtn").textContent = "Stop listening";
+  }
+  function stop() {
+    listening = false;
+    try { rec && rec.stop(); } catch {}
+    flush();
+    setStatus("Idle", false);
+    $("listenBtn").textContent = "Start listening";
+  }
+  $("listenBtn").addEventListener("click", () => (listening ? stop() : start()));
+  if (!SR) setStatus("Live listening needs Chrome, Edge or Safari. You can still type below.", false);
+})();
+</script>
+</body>
+</html>
