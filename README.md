@@ -6,7 +6,7 @@ A single web page that listens to a phone call and writes a clean Spanish transl
 
 1. Open `index.html` in Chrome or Edge on a laptop. Safari also works. You can open the file directly, or host it on GitHub Pages.
 2. Open **Settings** and paste your Claude API key. You can get one at console.anthropic.com. The key stays in your browser.
-3. Open **Glossary** and upload your glossary file (.docx, .txt, .csv or .tsv), or paste it in. Put one term per line, English then Spanish, for example `deductible = deducible`. A two-column table in a Word file also works.
+3. The app comes with the **LSNV English–Spanish Glossary of Legal & Public Benefits Terms** (Legal Services of Northern Virginia, updated January 2021) built in, about 2,900 terms. It's stored in `glossary-lsnv.js`, which has to stay next to `index.html`. To use a different glossary, open **Glossary** and upload a file (.docx, .txt, .csv or .tsv) or paste one in, one term per line, for example `deductible = deducible`. **Use LSNV glossary** switches back.
 4. Put the phone call on **speaker** next to the laptop, press **Start listening**, and allow microphone access.
 5. Each sentence the caller says shows up in English, followed by the cleaned-up Spanish. Glossary terms used in a line show as chips under it. Turn on **Read the Spanish aloud** if you want the translation spoken.
 

@@ -151,13 +151,14 @@ td:last-child { color: var(--es); }
   <details id="glossaryPanel">
     <summary><h2>Glossary</h2><span class="meta" id="glossaryMeta">No glossary loaded</span></summary>
     <div class="panel">
-      <p class="note">Upload your glossary (.docx, .txt, .csv or .tsv) or paste it below. One term per line, English then Spanish, separated by a tab, “=”, “→”, “ - ”, “:” or a comma. Tables in a Word file work too: first column English, second column Spanish.</p>
+      <p class="note">The LSNV Legal &amp; Public Benefits glossary is built in. To use a different one, upload it (.docx, .txt, .csv or .tsv) or paste it below. One term per line, English then Spanish, separated by a tab, “=”, “→”, “ - ”, “:” or a comma. Tables in a Word file work too: first column English, second column Spanish.</p>
       <div class="row">
         <input type="file" id="glossaryFile" accept=".docx,.txt,.csv,.tsv,text/plain,text/csv" aria-label="Glossary file">
       </div>
       <textarea id="glossaryText" aria-label="Glossary text" placeholder="policyholder = asegurado&#10;deductible = deducible&#10;claim = reclamo"></textarea>
       <div class="row">
         <button id="glossarySave">Use this glossary</button>
+        <button id="glossaryBuiltin">Use LSNV glossary</button>
         <span class="note" id="glossaryNote"></span>
       </div>
       <div class="tablewrap" id="glossaryTableWrap" hidden>
@@ -206,6 +207,7 @@ td:last-child { color: var(--es); }
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+<script src="glossary-lsnv.js"></script>
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -265,16 +267,33 @@ td:last-child { color: var(--es); }
     return lines.join("\n");
   }
 
+  const BUILTIN = (window.LSNV_GLOSSARY || []).map(([en, es]) => ({ en, es }));
+  const BUILTIN_NAME = "LSNV Legal & Public Benefits glossary";
+
+  function setGlossary(list, note, ok) {
+    glossary = list.map((g) => ({ ...g, keys: matchKeys(g.en) }));
+    renderGlossary();
+    $("glossaryNote").className = "note " + (ok ? "ok" : "warn");
+    $("glossaryNote").textContent = note;
+  }
+
   function applyGlossary(text, source) {
-    glossary = parseGlossary(text);
+    const list = parseGlossary(text);
+    if (!list.length) {
+      setGlossary(glossary, "No term pairs found. Put English and Spanish on one line, separated by a tab or “=”.", false);
+      return;
+    }
     store.set("glossary", text);
     $("glossaryText").value = text;
-    renderGlossary();
-    const n = glossary.length;
-    $("glossaryNote").className = "note " + (n ? "ok" : "warn");
-    $("glossaryNote").textContent = n
-      ? `Loaded ${n} term${n === 1 ? "" : "s"}${source ? " from " + source : ""}.`
-      : "No term pairs found. Put English and Spanish on one line, separated by a tab or “=”.";
+    setGlossary(list, `Loaded ${list.length} term${list.length === 1 ? "" : "s"}${source ? " from " + source : ""}.`, true);
+  }
+
+  function useBuiltin() {
+    store.set("glossary", "");
+    $("glossaryText").value = "";
+    setGlossary(BUILTIN, BUILTIN.length
+      ? `Using the ${BUILTIN_NAME} (${BUILTIN.length.toLocaleString()} terms).`
+      : "The built-in glossary file (glossary-lsnv.js) didn't load. Keep it next to index.html.", BUILTIN.length > 0);
   }
 
   function renderGlossary() {
@@ -307,22 +326,38 @@ td:last-child { color: var(--es); }
     }
   });
   $("glossarySave").addEventListener("click", () => applyGlossary($("glossaryText").value, ""));
+  $("glossaryBuiltin").addEventListener("click", useBuiltin);
 
-  applyGlossary(store.get("glossary", ""), "");
-  if (!glossary.length) $("glossaryNote").textContent = "";
+  // Words that label an entry rather than name it, e.g. "appeal - noun".
+  const LABELS = new Set(["noun", "verb", "adjective", "adj", "adverb", "the"]);
+  const norm = (str) => str.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, " ").replace(/\s+/g, " ").trim();
 
-  function relevantTerms(text) {
-    if (glossary.length <= 200) return { all: glossary, hits: matchTerms(text) };
-    const hits = matchTerms(text);
-    return { all: hits, hits };
+  // Spoken forms to look for: the term before any " – explanation", with and without its "(ABBR)", plus the abbreviation.
+  function matchKeys(en) {
+    const keys = new Set();
+    for (const part of [en.split(/\s[–—-]\s/)[0]]) {
+      for (const abbr of part.matchAll(/\(([^)]+)\)/g)) {
+        if (/^[A-Z][A-Z0-9-]{1,7}$/.test(abbr[1])) keys.add(norm(abbr[1]));
+      }
+      const k = norm(part.replace(/\([^)]*\)/g, " "));
+      if (k && !LABELS.has(k)) keys.add(k);
+    }
+    return [...keys];
   }
+
   function matchTerms(text) {
-    const t = " " + text.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, " ") + " ";
-    return glossary.filter((g) => {
-      const k = g.en.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, " ").trim();
-      return k && (t.includes(" " + k + " ") || t.includes(" " + k + "s ") || t.includes(" " + k + "es "));
-    });
+    const t = " " + norm(text) + " ";
+    return glossary.filter((g) => g.keys.some((k) =>
+      ["", "s", "es", "'s", "d", "ed", "ing"].some((end) => t.includes(" " + k + end + " "))));
   }
+  function relevantTerms(text) {
+    const hits = matchTerms(text);
+    return { all: glossary.length <= 200 ? glossary : hits, hits };
+  }
+
+  const savedGlossary = store.get("glossary", "");
+  if (savedGlossary && parseGlossary(savedGlossary).length) applyGlossary(savedGlossary, "");
+  else useBuiltin();
 
   // ---------- Translation ----------
   const history = []; // {src, es}
@@ -340,7 +375,7 @@ Rules:
     if (terms.length) {
       s += `
 
-Mandatory glossary. Whenever a source term below (or its plural or inflected form) appears, translate it with exactly the given Spanish term, adjusting only gender and number to fit the sentence:
+Mandatory glossary. Whenever a source term below (or its plural or inflected form) appears with that meaning, translate it with the given Spanish term, adjusting only gender and number to fit the sentence. When an entry lists several Spanish options, use the first one unless the context clearly calls for another listed option. If a glossary entry has an obvious spelling mistake, use the correctly spelled form. Text after a dash in the English column only explains which sense is meant:
 ` + terms.map((g) => `${g.en} => ${g.es}`).join("\n");
     }
     return s;
